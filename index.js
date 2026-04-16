@@ -65,10 +65,16 @@ async function run() {
     const parcelsCollection = db.collection("parcels");
     const paymentsCollection = db.collection("payments");
     const ridersCollection = db.collection("riders");
-    // Connect the client to the server	(optional starting in v4.7)
 
-    const verifyAdmin = (req, res, next) => {
+    // middle admin before allowing admin activity
+    // must be used after verifyFBToken middleware
+    const verifyAdmin = async (req, res, next) => {
       const email = req.decoded_email;
+      const query = { email }
+      const user = await usersCollection.findOne(query)
+      if (!user || user.role !== "admin") {
+        return res.status(403).send({message: "forbidden access"})
+      }
       next();
     };
 
@@ -118,7 +124,7 @@ async function run() {
         };
         const result = await usersCollection.updateOne(query, updateDoc);
         res.send(result);
-      }
+      },
     );
 
     // parcels related apis
@@ -323,7 +329,7 @@ async function run() {
         };
         const updateResult = await usersCollection.updateOne(
           userQuery,
-          updateUser
+          updateUser,
         );
       }
       res.send(result);
@@ -340,7 +346,7 @@ async function run() {
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
+      "Pinged your deployment. You successfully connected to MongoDB!",
     );
   } finally {
     // Ensures that the client will close when you finish/error
