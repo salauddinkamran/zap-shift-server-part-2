@@ -81,7 +81,19 @@ async function run() {
     // users related apis
 
     app.get("/users", verifyFBToken, async (req, res) => {
-      const result = await usersCollection.find().toArray();
+      const searchText = req.query.searchText;
+      const query = {};
+      if (searchText) {
+        query.$or = [
+          { displayName: { $regex: searchText, $options: "i" } },
+          { email: { $regex: searchText, $options: "i" } },
+        ];
+      }
+      const result = await usersCollection
+        .find(query)
+        .limit(5)
+        .sort({ createdAt: -1 })
+        .toArray();
       res.send(result);
     });
 
@@ -124,18 +136,35 @@ async function run() {
         };
         const result = await usersCollection.updateOne(query, updateDoc);
         res.send(result);
-      }
+      },
     );
 
     // parcels related apis
     app.get("/parcels", async (req, res) => {
       const query = {};
-      const { email } = req.query;
+      const { email, deliveryStatus } = req.query;
       if (email) {
         query.senderEmail = email;
       }
+      if (deliveryStatus) {
+        query.deliveryStatus = deliveryStatus;
+      }
       const options = { sort: { createdAt: -1 } };
       const cursor = parcelsCollection.find(query, options);
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
+    app.get("/parcels/rider", async (req, res) => {
+      const { riderEmail, deliveryStatus } = req.query;
+      const query = {};
+      if (riderEmail) {
+        query.riderEmail = riderEmail;
+      }
+      if (deliveryStatus) {
+        query.deliveryStatus = deliveryStatus;
+      }
+      const cursor = parcelsCollection.find(query);
       const result = await cursor.toArray();
       res.send(result);
     });
@@ -151,6 +180,33 @@ async function run() {
       parcel.createdAt = new Date();
       const result = await parcelsCollection.insertOne(parcel);
       res.send(result);
+    });
+
+    app.patch("/parcels/:id", async (req, res) => {
+      const { riderId, riderName, riderEmail } = req.body;
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const updateDoc = {
+        $set: {
+          deliveryStatus: "driver_assigned",
+          riderId: riderId,
+          riderName: riderName,
+          riderEmail: riderEmail,
+        },
+      };
+      const result = await parcelsCollection.updateOne(query, updateDoc);
+      const riderQuery = { _id: new ObjectId(riderId) };
+      const riderUpdatedDoc = {
+        $set: {
+          workStatus: "in_delivery",
+        },
+      };
+
+      const riderResult = await ridersCollection.updateOne(
+        riderQuery,
+        riderUpdatedDoc,
+      );
+      res.send(riderResult);
     });
 
     app.delete("/parcels/:id", async (req, res) => {
@@ -243,6 +299,7 @@ async function run() {
         const update = {
           $set: {
             paymentStatus: "paid",
+            deliveryStatus: "pending-pickup",
             trackingId: trackingId,
           },
         };
@@ -292,9 +349,16 @@ async function run() {
     // riders related apis
 
     app.get("/riders", async (req, res) => {
+      const { status, district, workStatus } = req.query;
       const query = {};
       if (req.query.status) {
-        query.status = req.query.status;
+        query.status = status;
+      }
+      if (district) {
+        query.riderRegion = district;
+      }
+      if (workStatus) {
+        query.workStatus = workStatus;
       }
       const cursor = ridersCollection.find(query);
       const result = await cursor.toArray();
@@ -316,6 +380,7 @@ async function run() {
       const updateDoc = {
         $set: {
           status: status,
+          workStatus: "available",
         },
       };
       const result = await ridersCollection.updateOne(query, updateDoc);
@@ -329,7 +394,7 @@ async function run() {
         };
         const updateResult = await usersCollection.updateOne(
           userQuery,
-          updateUser
+          updateUser,
         );
       }
       res.send(result);
@@ -346,7 +411,7 @@ async function run() {
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
+      "Pinged your deployment. You successfully connected to MongoDB!",
     );
   } finally {
     // Ensures that the client will close when you finish/error
