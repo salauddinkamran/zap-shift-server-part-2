@@ -136,7 +136,7 @@ async function run() {
         };
         const result = await usersCollection.updateOne(query, updateDoc);
         res.send(result);
-      },
+      }
     );
 
     // parcels related apis
@@ -162,7 +162,8 @@ async function run() {
         query.riderEmail = riderEmail;
       }
       if (deliveryStatus) {
-        query.deliveryStatus = deliveryStatus;
+        // query.deliveryStatus = deliveryStatus;
+        query.deliveryStatus = {$in: ["driver_assigned", "rider_arriving"]}
       }
       const cursor = parcelsCollection.find(query);
       const result = await cursor.toArray();
@@ -182,6 +183,7 @@ async function run() {
       res.send(result);
     });
 
+    // TODO:rename this to be specific like parcels/:id/assign
     app.patch("/parcels/:id", async (req, res) => {
       const { riderId, riderName, riderEmail } = req.body;
       const id = req.params.id;
@@ -204,9 +206,21 @@ async function run() {
 
       const riderResult = await ridersCollection.updateOne(
         riderQuery,
-        riderUpdatedDoc,
+        riderUpdatedDoc
       );
       res.send(riderResult);
+    });
+
+    app.patch("/parcels/:id/status", async (req, res) => {
+      const { deliveryStatus } = req.body;
+      const query = { _id: new ObjectId(req.params.id) };
+      const updatedDoc = {
+        $set: {
+          deliveryStatus: deliveryStatus,
+        },
+      };
+      const result = await parcelsCollection.updateOne(query, updatedDoc);
+      res.send(result);
     });
 
     app.delete("/parcels/:id", async (req, res) => {
@@ -394,7 +408,7 @@ async function run() {
         };
         const updateResult = await usersCollection.updateOne(
           userQuery,
-          updateUser,
+          updateUser
         );
       }
       res.send(result);
@@ -411,7 +425,7 @@ async function run() {
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!",
+      "Pinged your deployment. You successfully connected to MongoDB!"
     );
   } finally {
     // Ensures that the client will close when you finish/error
