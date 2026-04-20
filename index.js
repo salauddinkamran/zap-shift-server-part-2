@@ -458,7 +458,7 @@ async function run() {
       const trackingId = req.params.trackingId;
       const query = { trackingId };
       const result = await trackingsCollection.find(query).toArray();
-      req.send(result);
+      res.send(result);
     });
 
     await client.connect();
