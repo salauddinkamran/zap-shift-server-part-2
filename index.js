@@ -84,7 +84,7 @@ async function run() {
       const log = {
         trackingId,
         status,
-        details: status.split("-").join(" "),
+        details: status.split("_").join(" "),
         createdAt: new Date(),
       };
       const result = await trackingsCollection.insertOne(log);
@@ -194,7 +194,10 @@ async function run() {
     });
     app.post("/parcels", async (req, res) => {
       const parcel = req.body;
+      const trackingId = generateTrackingId();
       parcel.createdAt = new Date();
+      parcel.trackingId = trackingId;
+      logTracking(trackingId, "parcel_created");
       const result = await parcelsCollection.insertOne(parcel);
       res.send(result);
     });
@@ -338,6 +341,7 @@ async function run() {
           trackingId: pyamentExist.trackingId,
         });
       }
+      // use the previous tracking id
       const trackingId = generateTrackingId();
       if (session.payment_status === "paid") {
         const id = session.metadata.parcelId;
@@ -364,7 +368,7 @@ async function run() {
 
         if (session.payment_status === "paid") {
           const resultPayment = await paymentsCollection.insertOne(payment);
-          logTracking(trackingId, "pending-pickup");
+          logTracking(trackingId, "parcel_paid");
           res.send({
             success: true,
             modifyParcel: result,
