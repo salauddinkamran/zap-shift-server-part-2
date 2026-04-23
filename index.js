@@ -11,6 +11,7 @@ const crypto = require("crypto");
 const admin = require("firebase-admin");
 const serviceAccount = require("./zap-shift-firebase-adminsdk.json");
 const { resourceLimits } = require("worker_threads");
+const { count } = require("console");
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
@@ -79,6 +80,15 @@ async function run() {
       }
       next();
     };
+    const verifyRider = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      if (!user || user.role !== "rider") {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      next();
+    };
 
     const logTracking = async (trackingId, status) => {
       const log = {
@@ -110,7 +120,14 @@ async function run() {
       res.send(result);
     });
 
-    app.get("/users/:id", async (req, res) => {});
+    app.get("/users/email/:email", async (req, res) => {
+      const email = req.params.email;
+      // const query = { _id: new ObjectId(id) };
+      const result = await usersCollection.findOne({
+        email,
+      });
+      res.send(result);
+    });
 
     app.get("/users/:email/role", async (req, res) => {
       const email = req.params.email;
@@ -149,7 +166,7 @@ async function run() {
         };
         const result = await usersCollection.updateOne(query, updateDoc);
         res.send(result);
-      },
+      }
     );
 
     // parcels related apis
@@ -192,6 +209,20 @@ async function run() {
       const result = await parcelsCollection.findOne(query);
       res.send(result);
     });
+
+    app.get("/parcels/delivery-status/stats", async (req, res) => {
+      const pipeline = [
+        {
+          $group: {
+            _id: "$deliveryStatus",
+            count: { $sum: 1 },
+          },
+        },
+      ];
+      const result = await parcelsCollection.aggregate(pipeline).toArray()
+      res.send(result)
+    });
+
     app.post("/parcels", async (req, res) => {
       const parcel = req.body;
       const trackingId = generateTrackingId();
@@ -225,7 +256,7 @@ async function run() {
 
       const riderResult = await ridersCollection.updateOne(
         riderQuery,
-        riderUpdatedDoc,
+        riderUpdatedDoc
       );
       // log tracking
       logTracking(trackingId, "driver_assigned");
@@ -249,7 +280,7 @@ async function run() {
         };
         const riderResult = await ridersCollection.updateOne(
           riderQuery,
-          riderUpdatedDoc,
+          riderUpdatedDoc
         );
       }
       const result = await parcelsCollection.updateOne(query, updatedDoc);
@@ -288,7 +319,8 @@ async function run() {
         mode: "payment",
         metadata: {
           parcelId: paymentInfo.parcelId,
-          parcelName: paymentInfo.parcelName,
+          // parcelName: paymentInfo.parcelName,
+          trackingId: paymentInfo.trackingId,
         },
         customer_email: paymentInfo.senderEmail,
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
@@ -298,34 +330,35 @@ async function run() {
     });
 
     // OLD API
-    app.post("/create-checkout-session", async (req, res) => {
-      const paymentInfo = req.body;
-      const amount = parseInt(paymentInfo.cost) * 100;
-      const session = await stripe.checkout.sessions.create({
-        line_items: [
-          {
-            // Provide the exact Price ID (for example, price_1234) of the product you want to sell
-            price_data: {
-              currency: "USD",
-              unit_amount: amount,
-              product_data: {
-                name: paymentInfo.parcelName,
-              },
-            },
-            quantity: 1,
-          },
-        ],
-        customer_email: paymentInfo.senderEmail,
-        mode: "payment",
-        metadata: {
-          parcelId: paymentInfo.parcelId,
-        },
-        success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success`,
-        cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
-      });
-      console.log(session);
-      res.send({ url: session.url });
-    });
+    // app.post("/create-checkout-session", async (req, res) => {
+    //   const paymentInfo = req.body;
+    //   const amount = parseInt(paymentInfo.cost) * 100;
+    //   const session = await stripe.checkout.sessions.create({
+    //     line_items: [
+    //       {
+    //         // Provide the exact Price ID (for example, price_1234) of the product you want to sell
+    //         price_data: {
+    //           currency: "USD",
+    //           unit_amount: amount,
+    //           product_data: {
+    //             name: paymentInfo.parcelName,
+    //           },
+    //         },
+    //         quantity: 1,
+    //       },
+    //     ],
+    //     customer_email: paymentInfo.senderEmail,
+    //     mode: "payment",
+    //     metadata: {
+    //       parcelId: paymentInfo.parcelId,
+    //       trackingId: paymentInfo.trackingId,
+    //     },
+    //     success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success`,
+    //     cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+    //   });
+    //   console.log(session);
+    //   res.send({ url: session.url });
+    // });
 
     app.patch("/payment-success", async (req, res) => {
       const sessionId = req.query.session_id;
@@ -333,6 +366,7 @@ async function run() {
       // console.log("session retrieve", session);
       const transactionId = session.payment_intent;
       const query = { transactionId: transactionId };
+      // const query = { trackingId: trackingId };
       const pyamentExist = await paymentsCollection.findOne(query);
       if (pyamentExist) {
         return res.send({
@@ -341,8 +375,8 @@ async function run() {
           trackingId: pyamentExist.trackingId,
         });
       }
-      // use the previous tracking id
-      const trackingId = generateTrackingId();
+      // use the previous tracking id created during the parcel create which was set to the session metadata during session creation
+      const trackingId = session.metadata.trackingId;
       if (session.payment_status === "paid") {
         const id = session.metadata.parcelId;
         const query = { _id: new ObjectId(id) };
@@ -350,7 +384,6 @@ async function run() {
           $set: {
             paymentStatus: "paid",
             deliveryStatus: "pending-pickup",
-            trackingId: trackingId,
           },
         };
         const result = await parcelsCollection.updateOne(query, update);
@@ -366,20 +399,20 @@ async function run() {
           trackingId: trackingId,
         };
 
-        if (session.payment_status === "paid") {
-          const resultPayment = await paymentsCollection.insertOne(payment);
-          logTracking(trackingId, "parcel_paid");
-          res.send({
-            success: true,
-            modifyParcel: result,
-            trackingId: trackingId,
-            transactionId: session.payment_intent,
-            paymentInfo: resultPayment,
-          });
-        }
+        // if (session.payment_status === "paid") {
+        const resultPayment = await paymentsCollection.insertOne(payment);
+        logTracking(trackingId, "parcel_paid");
+        return res.send({
+          success: true,
+          modifyParcel: result,
+          trackingId: trackingId,
+          transactionId: session.payment_intent,
+          paymentInfo: resultPayment,
+        });
+        // }
         // res.send(result);
       }
-      res.send({ success: false });
+      return res.send({ success: false });
     });
 
     app.get("/payments", verifyFBToken, async (req, res) => {
@@ -445,7 +478,7 @@ async function run() {
         };
         const updateResult = await usersCollection.updateOne(
           userQuery,
-          updateUser,
+          updateUser
         );
       }
       res.send(result);
@@ -469,7 +502,7 @@ async function run() {
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
     console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!",
+      "Pinged your deployment. You successfully connected to MongoDB!"
     );
   } finally {
     // Ensures that the client will close when you finish/error
