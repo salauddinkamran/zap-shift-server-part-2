@@ -219,8 +219,8 @@ async function run() {
           },
         },
       ];
-      const result = await parcelsCollection.aggregate(pipeline).toArray()
-      res.send(result)
+      const result = await parcelsCollection.aggregate(pipeline).toArray();
+      res.send(result);
     });
 
     app.post("/parcels", async (req, res) => {
@@ -446,6 +446,36 @@ async function run() {
       }
       const cursor = ridersCollection.find(query);
       const result = await cursor.toArray();
+      res.send(result);
+    });
+
+    app.get("/riders/delivery-per-day", async (req, res) => {
+      const email = req.params.email;
+      const pipeline = [
+        {
+          $match: {
+            riderEmail: email,
+            deliveryStatus: "parcel_delivered",
+          },
+        },
+        {
+          $lookup: {
+            from: "trackings",
+            localField: "trackingId",
+            foreignField: "trackingId",
+            as: "parcle_trackings",
+          },
+        },
+        {
+          $unwind: "$parcel_trackings",
+        },
+        {
+          $match: {
+            "parcel_tracking.status": "parcel_delivered"
+          }
+        }
+      ];
+      const result = await parcelsCollection.aggregate(pipeline).toArray();
       res.send(result);
     });
 
